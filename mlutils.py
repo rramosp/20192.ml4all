@@ -230,13 +230,13 @@ class Example_Bayes2DClassifier():
                      title="bayesian frontier", xlabel="trilobite width", ylabel="trilobite height")
         plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=3, line_color="black")
 
-def display_distributions(x0,y0, s0, d0, x1, y1, s1, d1):
+def display_distributions(x0,y0, s0, d0, x1, y1, s1, d1, show_bayesians=False):
     mc = Example_Bayes2DClassifier(mean0=[x0, y0], cov0=[[s0, d0], [d0, s0+d0]],
                                            mean1=[x1, y1], cov1=[[s1, d1], [d1, s1+d1]])
-    mc.plot_contours()
+    mc.plot_contours(show_bayesians=show_bayesians)
     
 def interact_distributions():
-    from ipywidgets import FloatSlider, Label, GridBox, interactive, Layout, VBox
+    from ipywidgets import FloatSlider, Label, GridBox, interactive, Layout, VBox, Checkbox
     fx0=FloatSlider(value=2, description=" ", min=.5, max=4., step=.2, continuous_update=False,
                     layout=Layout(width='auto', grid_area='vx0'))
     fy0=FloatSlider(value=3, description=" ", min=.5, max=4., step=.2, continuous_update=False,
@@ -254,23 +254,28 @@ def interact_distributions():
                     layout=Layout(width='auto', grid_area='vs1'))
     fd1=FloatSlider(value=-.3, description=" ", min=-2., max=2., step=.1, continuous_update=False,
                     layout=Layout(width='auto', grid_area='vd1'))
+    
+    bay = Checkbox(value=False, description='Show bayesian errors',disabled=False,
+                   layout=Layout(width='auto', grid_area='bay'))
+
 
     l = lambda s,p, w="auto": Label(s, layout=Layout(width=w, grid_area=p))
 
     w = interactive(display_distributions,
                        x0=fx0, y0=fy0, s0=fs0, d0=fd0,
-                       x1=fx1, y1=fy1, s1=fs1, d1=fd1, continuous_update=False)
+                       x1=fx1, y1=fy1, s1=fs1, d1=fd1, show_bayesians=bay, continuous_update=False)
 
     w.children[-1].layout=Layout(width='auto', grid_area='fig')
 
     gb =GridBox(children=[fx0, fy0, fs0, fd0, fx1, fy1, fs1, fd1,
                           l("AMERICAN TRILOBYTE", "h0"), l("AFRICAN TRILOBYTE", "h1"),
                           l("width", "lx0"),l("height", "ly0"), l("spread", "ls0"), l("tilt", "ld0"),
-                          l("width", "lx1"),l("height", "ly1"), l("spread", "ls1"), l("tilt", "ld1")
+                          l("width", "lx1"),l("height", "ly1"), l("spread", "ls1"), l("tilt", "ld1"),
+                          bay
                          ],
             layout=Layout(
                 width='100%',
-                grid_template_rows='auto auto auto auto auto auto',
+                grid_template_rows='auto auto auto auto auto auto auto',
                 grid_template_columns='5% 30% 5% 30%',
                 grid_template_areas='''
                 "h0 h0 h1 h1"
@@ -278,6 +283,7 @@ def interact_distributions():
                 "ly0 vy0 ly1 vy1 "
                 "ls0 vs0 ls1 vs1 "
                 "ld0 vd0 ld1 vd1 "
+                "bay bay bay bay"
                 "fig fig fig fig"
                 ''')
            )
