@@ -49,15 +49,21 @@ def plot_2Ddata_with_boundary(predict, X, y, line_width=3, line_alpha=1, line_co
         
     return p0, p1
 
-def plot_contour(X,Y,Z, xlabel=None, ylabel=None, title=None, **kwargs):
-    CS = plt.contour(X,Y,Z, colors="k")
-    plt.clabel(CS, inline=1, fontsize=10)
-
-    plt.contourf(X,Y,Z, alpha=.7)
-    plt.grid(color="black", alpha=.3);
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
+def plot_contour(ax, X,Y,Z, xlabel=None, ylabel=None, 
+                 cmap=None, title=None, alpha=.7,
+                 contour_alpha = .5, levels=20,
+                 plot_contour_lines=True,
+                 plot_contour_labels=True, **kwargs):
+    
+    if plot_contour_lines:
+        CS = ax.contour(X,Y,Z, levels=levels, alpha=contour_alpha, colors="k")
+        if plot_contour_labels:
+            ax.clabel(CS, inline=1, fontsize=10)
+    ax.contourf(X,Y,Z, levels=levels, alpha=alpha, cmap=cmap)
+    ax.grid(color="black", alpha=.3);
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
 
 
 def twospirals(n_points, noise=.5):
@@ -184,10 +190,12 @@ class Example_Bayes2DClassifier():
         tpr = np.sum(p1*gx)/np.sum(p1)
         return (self.w0*tnr+self.w1*tpr)/(self.w0+self.w1)  
 
-    def plot_contours(self, show_bayesians=False):
+    def plot_contours(self, fig=None, show_bayesians=False):
         X,_ = self.sample(n_samples=500)
         minx0, minx1 = np.min(X,axis=0)
-        maxx0, maxx1 = np.max(X,axis=0)    
+        maxx0, maxx1 = np.max(X,axis=0)
+        minx0,minx1 = 0,0
+        maxx0,maxx1 = 5,5
         xmesh, ymesh, p1,p2 = self.get_prob_mesh([minx0,maxx0],[minx1,maxx1])
         pmax= np.max(np.r_[[p1,p2]])
         ds = ((maxx0-minx0)/p1.shape[0])*((maxx1-minx1)/p1.shape[1])
@@ -196,21 +204,101 @@ class Example_Bayes2DClassifier():
             err2 = ", bayes error = %.2f"%np.sum(p2[p1>p2]*ds)
         else:
             err1, err2 =  "", ""
-        plt.figure(figsize=(15,5))
-        plt.subplot(131)
-        plot_contour(xmesh, ymesh, p1, title="american trilobite"+err1, xlabel="trilobite width", ylabel="trilobite height")
+        if fig is None:
+            fig = plt.figure(figsize=(15,5))
+        ax = fig.add_subplot(131)
+        plot_contour(ax, xmesh, ymesh, p1, 
+                     plot_contour_labels=False, plot_contour_lines=False,
+                     contour_alpha=.5,
+                     alpha=.7, cmap=plt.cm.Reds,
+                     title="american trilobite"+err1, xlabel="trilobite width", ylabel="trilobite height")
+#        plt.xlim(0,5); plt.ylim(0,5)
         if show_bayesians:
-            plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=1, line_color="red")
-        plt.subplot(132)
-        p2[0,0] = pmax
-        plot_contour(xmesh, ymesh, p2, title="african trilobite"+err2, xlabel="trilobite width", ylabel="trilobite height", vmin=0, vmax=pmax)
+            plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=3, line_color="black")
+        ax = fig.add_subplot(132)
+#        p2[0,0] = pmax
+        plot_contour(ax, xmesh, ymesh, p2, 
+                     plot_contour_labels=False, plot_contour_lines=False,
+                     contour_alpha=.5,
+                     alpha=.7, cmap=plt.cm.Blues,
+                     title="african trilobite"+err2, xlabel="trilobite width", ylabel="trilobite height", vmin=0, vmax=pmax)
         if show_bayesians:
-            plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=1, line_color="red")
-        plt.subplot(133)
-        plot_contour(xmesh, ymesh, (p1-p2), title="bayesian frontier", xlabel="trilobite width", ylabel="trilobite height")
-        plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=1, line_color="red")
+            plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=3, line_color="black")
+        ax = fig.add_subplot(133)
+        plot_contour(ax, xmesh, ymesh, (p1-p2), 
+                     cmap=plt.cm.RdBu_r, levels=10,
+                     title="bayesian frontier", xlabel="trilobite width", ylabel="trilobite height")
+        plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=3, line_color="black")
+
+def display_distributions(x0,y0, s0, d0, x1, y1, s1, d1):
+    mc = Example_Bayes2DClassifier(mean0=[x0, y0], cov0=[[s0, d0], [d0, s0+d0]],
+                                           mean1=[x1, y1], cov1=[[s1, d1], [d1, s1+d1]])
+    mc.plot_contours()
+    
+def interact_distributions():
+    from ipywidgets import FloatSlider, Label, GridBox, interactive, Layout, VBox
+    fx0=FloatSlider(value=2, description=" ", min=.5, max=4., step=.2, continuous_update=False,
+                    layout=Layout(width='auto', grid_area='vx0'))
+    fy0=FloatSlider(value=3, description=" ", min=.5, max=4., step=.2, continuous_update=False,
+                    layout=Layout(width='auto', grid_area='vy0'))
+    fs0=FloatSlider(value=1, description=" ", min=.1, max=4., step=.2, continuous_update=False,
+                    layout=Layout(width='auto', grid_area='vs0'))
+    fd0=FloatSlider(value=.9, description=" ", min=-2., max=2., step=.1, continuous_update=False,
+                    layout=Layout(width='auto', grid_area='vd0'))
+
+    fx1=FloatSlider(value=2, description=" ", min=.5, max=4., step=.2, continuous_update=False,
+                    layout=Layout(width='auto', grid_area='vx1'))
+    fy1=FloatSlider(value=2, description=" ", min=.5, max=4., step=.2, continuous_update=False,
+                    layout=Layout(width='auto', grid_area='vy1'))
+    fs1=FloatSlider(value=1, description=" ", min=.1, max=4., step=.2, continuous_update=False,
+                    layout=Layout(width='auto', grid_area='vs1'))
+    fd1=FloatSlider(value=-.3, description=" ", min=-2., max=2., step=.1, continuous_update=False,
+                    layout=Layout(width='auto', grid_area='vd1'))
+
+    l = lambda s,p, w="auto": Label(s, layout=Layout(width=w, grid_area=p))
+
+    w = interactive(display_distributions,
+                       x0=fx0, y0=fy0, s0=fs0, d0=fd0,
+                       x1=fx1, y1=fy1, s1=fs1, d1=fd1, continuous_update=False)
+
+    w.children[-1].layout=Layout(width='auto', grid_area='fig')
+
+    gb =GridBox(children=[fx0, fy0, fs0, fd0, fx1, fy1, fs1, fd1,
+                          l("AMERICAN TRILOBYTE", "h0"), l("AFRICAN TRILOBYTE", "h1"),
+                          l("width", "lx0"),l("height", "ly0"), l("spread", "ls0"), l("tilt", "ld0"),
+                          l("width", "lx1"),l("height", "ly1"), l("spread", "ls1"), l("tilt", "ld1")
+                         ],
+            layout=Layout(
+                width='100%',
+                grid_template_rows='auto auto auto auto auto auto',
+                grid_template_columns='5% 30% 5% 30%',
+                grid_template_areas='''
+                "h0 h0 h1 h1"
+                "lx0 vx0 lx1 vx1 "
+                "ly0 vy0 ly1 vy1 "
+                "ls0 vs0 ls1 vs1 "
+                "ld0 vd0 ld1 vd1 "
+                "fig fig fig fig"
+                ''')
+           )
 
 
+    def limit_fd0(*args):
+        fd0.max = fs0.value+fs0.value*0.5
+        fd0.min = -fs0.value*0.5
+    def limit_fd1(*args):
+        fd1.max = fs1.value+fs1.value*0.5
+        fd1.min = -fs1.value*0.5
+    fs0.observe(limit_fd0, "value")
+    fd0.observe(limit_fd0, "value")
+    fs1.observe(limit_fd1, "value")
+    fd1.observe(limit_fd1, "value")
+
+    w.children[0].value=1
+    display(VBox([gb, w.children[-1]]))
+    return fx0, fy0, fs0, fd0, fx1, fy1, fs1, fd1        
+        
+        
 def plot_estimator_border(bayes_classifier, estimator=None, 
                           mins=None, maxs=None,
                           estimator_name=None, X=None, y=None, n_samples=500,legend=True):    
