@@ -10,10 +10,33 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import GaussianNB
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
-import tensorflow as tf
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.svm import SVC
+from time import time
+#import tensorflow as tf
+#from tensorflow.keras import backend as K
 import time
+
+
+classifiers = {
+               0: [None, "None"],
+               1: [LogisticRegression(solver="lbfgs"), "Linear Classifier"],
+               2: [GaussianNB(), "Naive Gaussian"],
+               3: [SVC(gamma=.5), "SVM gamma=0.1"], 
+               4: [SVC(gamma=10), "SVM gamma=10"],
+               5: [SVC(gamma=100), "SVM gamma=100"],
+               6: [DecisionTreeClassifier(max_depth=2), "DecisionTree depth=2"],
+               7: [DecisionTreeClassifier(max_depth=100), "DecisionTree depth=100"],
+               8: [RandomForestClassifier(n_estimators=2, max_depth=2), "RandomForest 2 trees depth=2"],
+               9: [RandomForestClassifier(n_estimators=20, max_depth=2), "RandomForest 20 trees depth=2"],
+              10: [KNeighborsClassifier(n_neighbors=3), "3 neighbours"],
+              11: [KNeighborsClassifier(n_neighbors=15), "15 neighbours"],
+              }
+
 
 def pbar(**kwargs):
     sys.stdout.flush()
@@ -21,7 +44,8 @@ def pbar(**kwargs):
     time.sleep(.2)
     return progressbar.ProgressBar(**kwargs)
 
-def plot_2D_boundary(predict, mins, maxs, margin_pct=.2, n=200, line_width=3, line_color="black", line_alpha=1, label=None):
+def xplot_2D_boundary(predict, mins, maxs, margin_pct=.2, n=200, line_width=3, 
+                     line_color="black", line_alpha=1, line_style=None, label=None):
     n = 200 if n is None else n
     mins -= np.abs(mins)*margin_pct
     maxs += np.abs(maxs)*margin_pct
@@ -33,10 +57,32 @@ def plot_2D_boundary(predict, mins, maxs, margin_pct=.2, n=200, line_width=3, li
     levels = np.sort(np.unique(preds))
     levels = [np.min(levels)-1] + [np.mean(levels[i:i+2]) for i in range(len(levels)-1)] + [np.max(levels)+1]
     p = (preds*1.).reshape((n,n))
-    plt.contour(gd0,gd1,p, levels=levels, alpha=line_alpha, colors=line_color, linewidths=line_width)
+    plt.contour(gd0,gd1,p, levels=levels, alpha=line_alpha, colors=line_color, linestyles=line_style, linewidths=line_width)
     if label is not None:
-        plt.plot([0,0],[0,0], lw=line_width, color=line_color, label=label)
+        plt.plot([0,0],[0,0], lw=line_width, color=line_color, ls=line_style, label=label)
     return np.sum(p==0)*1./n**2, np.sum(p==1)*1./n**2
+
+def plot_2D_boundary(predict, mins, maxs, margin_pct=.2, n=200, line_width=3, 
+                     line_color="black", line_alpha=1, line_style=None, label=None,
+                     background_cmap=None, background_alpha=.5):
+    n = 200 if n is None else n
+    mins -= np.abs(mins)*margin_pct
+    maxs += np.abs(maxs)*margin_pct
+    d0 = np.linspace(mins[0], maxs[0],n)
+    d1 = np.linspace(mins[1], maxs[1],n)
+    gd0,gd1 = np.meshgrid(d0,d1)
+    D = np.hstack((gd0.reshape(-1,1), gd1.reshape(-1,1)))
+    preds = predict(D)
+    levels = np.sort(np.unique(preds))
+    levels = [np.min(levels)-1] + [np.mean(levels[i:i+2]) for i in range(len(levels)-1)] + [np.max(levels)+1]
+    p = (preds*1.).reshape((n,n))
+    if background_cmap is not None:
+        plt.contourf(gd0,gd1,p, levels=levels, cmap=background_cmap, alpha=background_alpha)
+    plt.contour(gd0,gd1,p, levels=levels, colors=line_color, alpha=line_alpha, linestyles=line_style, linewidths=line_width)
+    if label is not None:
+        plt.plot([0,0],[0,0], lw=line_width, color=line_color, ls=line_style, label=label)
+    return np.sum(p==0)*1./n**2, np.sum(p==1)*1./n**2
+
 
 def plot_2Ddata_with_boundary(predict, X, y, line_width=3, line_alpha=1, line_color="black", dots_alpha=.5, label=None, noticks=False):
     mins,maxs = np.min(X,axis=0), np.max(X,axis=0)    
@@ -190,53 +236,92 @@ class Example_Bayes2DClassifier():
         tpr = np.sum(p1*gx)/np.sum(p1)
         return (self.w0*tnr+self.w1*tpr)/(self.w0+self.w1)  
 
-    def plot_contours(self, fig=None, show_bayesians=False):
-        X,_ = self.sample(n_samples=500)
-        minx0, minx1 = np.min(X,axis=0)
-        maxx0, maxx1 = np.max(X,axis=0)
-        minx0,minx1 = 0,0
-        maxx0,maxx1 = 5,5
+    def get_bayes_errors(self):
+        minx0,maxx0 = -10,10
+        minx1,maxx1 = -10,10
         xmesh, ymesh, p1,p2 = self.get_prob_mesh([minx0,maxx0],[minx1,maxx1])
         pmax= np.max(np.r_[[p1,p2]])
         ds = ((maxx0-minx0)/p1.shape[0])*((maxx1-minx1)/p1.shape[1])
+        err1 = np.sum(p1[p2>p1]*ds)
+        err2 = np.sum(p2[p1>p2]*ds)
+        return err1, err2
+    
+    def plot_contours(self, fig=None, show_bayesians=False, resample_points=False):
+        global xxx_sample_points
+        X,_ = self.sample(n_samples=500)
+        minx0,minx1 = 0,0
+        maxx0,maxx1 = 5,5
+        
+        if resample_points or not "xxx_sample_points" in globals():
+            print ("resampling points")
+            s0,s1 = [], []
+            s0 = np.random.random(5)*(maxx0-minx0)+minx0
+            s1 = np.random.random(5)*(maxx1-minx1)+minx1
+            xxx_sample_points = [s0,s1]            
+        s0, s1 = xxx_sample_points
+        labels = [chr(65+i) for i in range(len(s0))]
+
+        e1,e2 = self.get_bayes_errors()
+        
         if show_bayesians:
-            err1 = ", bayes error = %.2f"%np.sum(p1[p2>p1]*ds)
-            err2 = ", bayes error = %.2f"%np.sum(p2[p1>p2]*ds)
+            err1 = ", bayes error = %.2f"%e1
+            err2 = ", bayes error = %.2f"%e2
         else:
             err1, err2 =  "", ""
+        
+        
+        
+        xmesh, ymesh, p1,p2 = self.get_prob_mesh([minx0,maxx0],[minx1,maxx1])
+        pmax= np.max(np.r_[[p1,p2]])
         if fig is None:
             fig = plt.figure(figsize=(15,5))
         ax = fig.add_subplot(131)
+        plt.xlim(minx0, maxx0); plt.ylim(minx1, maxx1)
         plot_contour(ax, xmesh, ymesh, p1, 
                      plot_contour_labels=False, plot_contour_lines=False,
                      contour_alpha=.5,
                      alpha=.7, cmap=plt.cm.Reds,
-                     title="american trilobite"+err1, xlabel="trilobite width", ylabel="trilobite height")
-#        plt.xlim(0,5); plt.ylim(0,5)
+                     title="american trilobite"+err1, xlabel="trilobite size", ylabel="trilobite weight")
+        plt.scatter(s0, s1, color="black", s=200, marker="+")
+        for i in range(len(s0)):
+            plt.text(s0[i]+(maxx0-minx0)*.05, s1[i], labels[i])
         if show_bayesians:
             plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=3, line_color="black")
         ax = fig.add_subplot(132)
-#        p2[0,0] = pmax
+        plt.xlim(minx0, maxx0); plt.ylim(minx1, maxx1)
         plot_contour(ax, xmesh, ymesh, p2, 
                      plot_contour_labels=False, plot_contour_lines=False,
                      contour_alpha=.5,
                      alpha=.7, cmap=plt.cm.Blues,
-                     title="african trilobite"+err2, xlabel="trilobite width", ylabel="trilobite height", vmin=0, vmax=pmax)
+                     title="african trilobite"+err2, xlabel="trilobite size", ylabel="trilobite weight", vmin=0, vmax=pmax)
+        plt.scatter(s0, s1, color="black", s=200, marker="+")
         if show_bayesians:
             plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=3, line_color="black")
-        ax = fig.add_subplot(133)
-        plot_contour(ax, xmesh, ymesh, (p1-p2), 
-                     cmap=plt.cm.RdBu_r, levels=10,
-                     title="bayesian frontier", xlabel="trilobite width", ylabel="trilobite height")
-        plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=3, line_color="black")
+        for i in range(len(s0)):
+            plt.text(s0[i]+(maxx0-minx0)*.05, s1[i], labels[i])
+        if show_bayesians:
+            ax = fig.add_subplot(133)
+            plt.xlim(minx0, maxx0); plt.ylim(minx1, maxx1)
+            plot_contour(ax, xmesh, ymesh, (p1-p2), 
+                         cmap=plt.cm.RdBu_r, levels=10, alpha=.3, 
+                         title="NATURAL (bayesian) frontier", xlabel="trilobite size", ylabel="trilobite weight")
+            plot_2D_boundary(self.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, line_width=3, line_color="black")
+            plt.scatter(s0, s1, color="black", s=200, marker="+")
+            for i in range(len(s0)):
+                plt.text(s0[i]+(maxx0-minx0)*.05, s1[i], labels[i])
+        return fig
 
-def display_distributions(x0,y0, s0, d0, x1, y1, s1, d1, show_bayesians=False):
+def display_distributions(x0,y0, s0, d0, x1, y1, s1, d1, dummy, show_bayesians=False):
+    global do_resample_points
+    if not "do_resample_points" in globals():
+        do_resample_points = False
     mc = Example_Bayes2DClassifier(mean0=[x0, y0], cov0=[[s0, d0], [d0, s0+d0]],
                                            mean1=[x1, y1], cov1=[[s1, d1], [d1, s1+d1]])
-    mc.plot_contours(show_bayesians=show_bayesians)
-    
+    fig1 = mc.plot_contours(show_bayesians=show_bayesians, resample_points=do_resample_points)
+
 def interact_distributions():
-    from ipywidgets import FloatSlider, Label, GridBox, interactive, Layout, VBox, Checkbox
+    from ipywidgets import FloatSlider, Label, GridBox, interactive, Layout, VBox, \
+                           HBox, Checkbox, IntSlider, Box, Button, widgets
     fx0=FloatSlider(value=2, description=" ", min=.5, max=4., step=.2, continuous_update=False,
                     layout=Layout(width='auto', grid_area='vx0'))
     fy0=FloatSlider(value=3, description=" ", min=.5, max=4., step=.2, continuous_update=False,
@@ -254,37 +339,57 @@ def interact_distributions():
                     layout=Layout(width='auto', grid_area='vs1'))
     fd1=FloatSlider(value=-.3, description=" ", min=-2., max=2., step=.1, continuous_update=False,
                     layout=Layout(width='auto', grid_area='vd1'))
+    fdummy = FloatSlider(value=2, description= " ", min=1, max=4, step=1)
     
-    bay = Checkbox(value=False, description='Show bayesian errors',disabled=False,
-                   layout=Layout(width='auto', grid_area='bay'))
-
-
     l = lambda s,p, w="auto": Label(s, layout=Layout(width=w, grid_area=p))
+
+
+    bay = Checkbox(value=False, description='show NATURAL frontiers',disabled=False, indent=False,
+                   layout=Layout(width="80%"))
+
+    resample = Button(description="resample data points")                
+
+    from IPython.core.display import clear_output
+    def resample_onclick(_):
+        global do_resample_points
+        do_resample_points = True
+        tmp = fdummy.value
+        fdummy.value = tmp+(1 if tmp<3 else -1)
+        do_resample_points = False
+        
+    resample.on_click(resample_onclick)
 
     w = interactive(display_distributions,
                        x0=fx0, y0=fy0, s0=fs0, d0=fd0,
-                       x1=fx1, y1=fy1, s1=fs1, d1=fd1, show_bayesians=bay, continuous_update=False)
+                       x1=fx1, y1=fy1, s1=fs1, d1=fd1, show_bayesians=bay, dummy=fdummy,
+                       continuous_update=False)
 
     w.children[-1].layout=Layout(width='auto', grid_area='fig')
 
+    controls = Box([bay, resample],
+                     layout=Layout(grid_area="ctr", 
+                     display="flex-flow",
+                     justify_content="flex-start",
+                     flex_flow="column",
+                     align_items = 'flex-start'))
+
     gb =GridBox(children=[fx0, fy0, fs0, fd0, fx1, fy1, fs1, fd1,
                           l("AMERICAN TRILOBYTE", "h0"), l("AFRICAN TRILOBYTE", "h1"),
-                          l("width", "lx0"),l("height", "ly0"), l("spread", "ls0"), l("tilt", "ld0"),
-                          l("width", "lx1"),l("height", "ly1"), l("spread", "ls1"), l("tilt", "ld1"),
-                          bay
+                          l("size", "lx0"),l("weight", "ly0"), l("spread", "ls0"), l("tilt", "ld0"),
+                          l("size", "lx1"),l("weight", "ly1"), l("spread", "ls1"), l("tilt", "ld1"),
+                          controls
                          ],
             layout=Layout(
                 width='100%',
                 grid_template_rows='auto auto auto auto auto auto auto',
-                grid_template_columns='5% 30% 5% 30%',
+                grid_template_columns='5% 30% 5% 30% 30%',
                 grid_template_areas='''
-                "h0 h0 h1 h1"
-                "lx0 vx0 lx1 vx1 "
-                "ly0 vy0 ly1 vy1 "
-                "ls0 vs0 ls1 vs1 "
-                "ld0 vd0 ld1 vd1 "
-                "bay bay bay bay"
-                "fig fig fig fig"
+                "h0 h0 h1 h1 ."
+                "lx0 vx0 lx1 vx1 ."
+                "ly0 vy0 ly1 vy1 ctr"
+                "ls0 vs0 ls1 vs1 ctr"
+                "ld0 vd0 ld1 vd1 ctr"
+                "fig fig fig fig fig"
                 ''')
            )
 
@@ -301,9 +406,132 @@ def interact_distributions():
     fd1.observe(limit_fd1, "value")
 
     w.children[0].value=1
-    display(VBox([gb, w.children[-1]]))
+    widget1 = VBox([gb, w.children[-1]])
+    display(widget1)
     return fx0, fy0, fs0, fd0, fx1, fy1, fs1, fd1        
         
+        
+def display_traintest(n_samples, test_pct, show_bayesian, classifier):
+    from time import time
+    global params
+    global classifiers
+    x0,y0,s0,d0,x1,y1,s1,d1 = params
+    minx0,minx1 = 0,0
+    maxx0,maxx1 = 5,5
+
+    mc = Example_Bayes2DClassifier(mean0=[x0.value, y0.value], cov0=[[s0.value, d0.value], [d0.value, s0.value+d0.value]],
+                                           mean1=[x1.value, y1.value], cov1=[[s1.value, d1.value], [d1.value, s1.value+d1.value]])
+
+    X,y = mc.sample(n_samples)
+    global X_train, X_test, y_train, y_test, last_testpct, last_nsamples
+
+    if not "last_testpct" in globals() or last_testpct!=test_pct or\
+       not "last_nsamples" in globals() or last_nsamples!=n_samples:
+        X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=test_pct)
+        last_testpct = test_pct
+        last_nsamples = n_samples
+    e0,e1 = mc.get_bayes_errors()
+    berror_train0 = np.mean(mc.predict(X_train[y_train==0])!=0)
+    berror_train1 = np.mean(mc.predict(X_train[y_train==1])!=1)
+    berror_test0  = np.mean(mc.predict(X_test[y_test==0])!=0)
+    berror_test1  = np.mean(mc.predict(X_test[y_test==1])!=1)
+    est_label, time_str, train_str, test_str = "", "", "", ""
+    if classifier is not None and classifier!=0:
+        est = classifiers[classifier][0]
+        est_label = classifiers[classifier][1]
+        start = time()
+        est.fit(X_train, y_train)
+        fitting_time = time()-start
+        time_str = "fit time  (TRAIN)    %.2f $\mu$secs"%(fitting_time*1000)
+        
+        start = time()
+        test_score0 = np.mean(est.predict(X_test)[y_test==0]==0)
+        test_score1 = np.mean(est.predict(X_test)[y_test==1]==1)
+        predict_time = time()-start
+        time_str += "\npredict time (TEST) %.2f $nano$secs"%(1000*predict_time)
+
+        train_score0 = np.mean(est.predict(X_train)[y_train==0]==0)
+        train_score1 = np.mean(est.predict(X_train)[y_train==1]==1)
+
+        train_str = "errors:    reds %.1f%s  |   blues %.1f%s"%((1-train_score0)*100,"%", (1-train_score1)*100,"%")
+        test_str  = "errors:    reds %.1f%s  |   blues %.1f%s"%((1-test_score0)*100,"%", (1-test_score1)*100,"%")
+
+    def show_boundaries():
+        if show_bayesian:
+            plot_2D_boundary(mc.predict, [minx0,minx1], [maxx0, maxx1], margin_pct=0.001, 
+                                     background_cmap=plt.cm.RdBu, background_alpha=.2,
+                                     line_width=2, line_color="black", line_alpha=1, line_style="-")
+        if classifier is not None and classifier!=0:
+            plot_2D_boundary(est.predict, [minx0,minx1], [maxx0,maxx1], 
+                                     background_cmap=plt.cm.RdBu, background_alpha=.2,
+                                     line_width=1, line_color="black", line_alpha=1, line_style="--")
+
+    plt.figure(figsize=(15,5))
+    plt.subplot(131)
+    plt.scatter(X_train[:,0][y_train==0], X_train[:,1][y_train==0], color="red", alpha=.7)
+    plt.scatter(X_train[:,0][y_train==1], X_train[:,1][y_train==1], color="blue", alpha=.7)
+    show_boundaries()
+    plt.title("TRAIN data, %d objects\n"%len(X_train)+train_str)
+    plt.grid()
+    plt.axis("equal")
+    plt.xlim(0,5)
+    plt.ylim(0,5)
+
+    plt.subplot(132)
+    plt.scatter(X_test[:,0][y_test==0], X_test[:,1][y_test==0], color="red", alpha=.7)
+    plt.scatter(X_test[:,0][y_test==1], X_test[:,1][y_test==1], color="blue", alpha=.7)
+    show_boundaries()
+    plt.title("TEST data, %d objects\n"%len(X_test)+test_str)
+    plt.grid()
+    plt.axis("equal")
+    plt.xlim(0,5)
+    plt.ylim(0,5)
+
+    plt.subplot(133)
+    plt.text(0,  .8, est_label, fontsize=18)
+    plt.text(0.2,.3, time_str, fontsize=14)
+    if show_bayesian:
+        plt.text(0,2, "Bayes (NATURAL) error", fontsize=18)
+        plt.text(0,1.5,"reds", fontsize=14)
+        plt.text(0,1.3,"blues", fontsize=14)
+        plt.text(.5,1.5, "%.1f%s"%(e0*100,"%"), fontsize=14)
+        plt.text(.5,1.3, "%.1f%s"%(e1*100,"%"), fontsize=14)
+        plt.text(1,1.5, "%.1f%s"%(berror_train0*100,"%"), fontsize=14)
+        plt.text(1,1.3, "%.1f%s"%(berror_train1*100,"%"), fontsize=14)
+        plt.text(1.6,1.5, "%.1f%s"%(berror_test0*100,"%"), fontsize=14)
+        plt.text(1.6,1.3, "%.1f%s"%(berror_test1*100,"%"), fontsize=14)
+        plt.text(.4,1.73, "analytical", fontsize=12)
+        plt.text(1,1.73, "TRAIN", fontsize=12)
+        plt.text(1.6,1.73, "TEST", fontsize=12)
+    plt.ylim(0,3)
+    plt.xlim(0,2)
+    plt.axis("off")
+
+def interact_traintest(p):
+    global params
+    params = p
+    from ipywidgets import FloatSlider, Label, GridBox, interactive, Layout, VBox, \
+                           HBox, Checkbox, IntSlider, Box, Button, widgets, Dropdown
+
+    fn_samples = IntSlider(value=101, description="# samples",  min=100, max=2000, step=100, continuous_update=False)
+    ftest_pct =  FloatSlider(value=.25, description="% test",  min=.1, max=.9, step=.05, continuous_update=False)
+    fbay =        Checkbox(value=False, description='show NATURAL frontiers',indent=False, continuous_update=False)
+
+    cvals = [i[1] for i in classifiers.values()]    
+    fclassifier = Dropdown(
+        options=[[j[1],i] for i,j in classifiers.items()],
+        value=0,
+        description='Classifier:',
+        disabled=False,
+    )    
+
+    fall = HBox([fn_samples, fclassifier, ftest_pct, fbay])
+
+    w = interactive(display_traintest, n_samples=fn_samples, test_pct=ftest_pct, 
+                    show_bayesian=fbay, classifier=fclassifier)
+    w.children[0].value = 100
+    widget1 = VBox([fall, w.children[-1]])
+    display(widget1)      
         
 def plot_estimator_border(bayes_classifier, estimator=None, 
                           mins=None, maxs=None,
@@ -718,7 +946,6 @@ def show_preds(x, y, preds):
         plt.legend(loc='upper center', bbox_to_anchor=(0.5, +1.35),ncol=5)
 
         
-from tensorflow.keras import backend as K
 def get_activations(model, model_inputs, layer_name=None):
     activations = []
     inp = model.input
